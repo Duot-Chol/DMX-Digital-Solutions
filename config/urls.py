@@ -23,6 +23,7 @@ urlpatterns = [
     path("api/v1/products/", include("products.urls")),
     path("api/v1/services/", include("services.urls")),
     path("api/v1/leads/", include("leads.urls")),
+    path("api/v1/demo-requests/", include("demo_requests.urls")),
 ]
 
 
