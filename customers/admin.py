@@ -1,4 +1,3 @@
-
 from django.contrib import admin
 
 from .models import Customer
@@ -84,3 +83,11 @@ class CustomerAdmin(admin.ModelAdmin):
     ordering = ("name", "customer_number")
     list_per_page = 25
     date_hierarchy = "created_at"
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly_fields = list(super().get_readonly_fields(request, obj))
+
+        if obj is not None:
+            readonly_fields.append("customer_number")
+
+        return tuple(readonly_fields)

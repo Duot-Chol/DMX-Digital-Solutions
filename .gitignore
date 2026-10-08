@@ -51,7 +51,8 @@ htmlcov/
 Thumbs.db
 
 # Temporary files
-*.tmp
-*.temp
 *.swp
 *.swo
+
+# Local database backups
+backups/

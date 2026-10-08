@@ -129,12 +129,51 @@ ASGI_APPLICATION = "config.asgi.application"
 # DATABASE
 # ============================================================
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").strip().lower()
+
+if DB_ENGINE == "postgresql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB", "dmx_digital_solutions"),
+            "USER": os.getenv("POSTGRES_USER", "dmx_app_user"),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
+            "HOST": os.getenv("POSTGRES_HOST", "127.0.0.1"),
+            "PORT": os.getenv("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+            "TEST": {
+                "NAME": os.getenv(
+                    "POSTGRES_TEST_DB",
+                    "test_dmx_digital_solutions",
+                ),
+            },
+        }
     }
-}
+
+    # Separate database connection for Django's test runner.
+    # The test role is never used for normal application requests.
+    if os.getenv("DMX_USE_TEST_DATABASE", "").strip().lower() == "true":
+        DATABASES["default"]["USER"] = os.getenv(
+            "POSTGRES_TEST_USER",
+            "dmx_test_user",
+        )
+        DATABASES["default"]["PASSWORD"] = os.getenv(
+            "POSTGRES_TEST_PASSWORD",
+            "",
+        )
+
+elif DB_ENGINE == "sqlite":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+else:
+    raise ValueError(
+        f"Unsupported DB_ENGINE: {DB_ENGINE!r}. "
+        "Use 'sqlite' or 'postgresql'."
+    )
 
 
 # ============================================================
