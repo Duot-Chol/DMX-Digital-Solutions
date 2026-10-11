@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "leads",
     "demo_requests",
     "customers",
+    "subscriptions",
 ]
 
 
