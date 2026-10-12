@@ -1,10 +1,18 @@
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.urls import reverse
+
+from rest_framework import status
+from rest_framework.test import APIClient
 
 from customers.models import Customer, CustomerNumberCounter
 from customers.services.customer_number_service import CustomerNumberService
 from customers.services.customer_service import CustomerService
 from leads.models import Lead
+
+
+User = get_user_model()
 
 
 class CustomerNumberServiceTests(TestCase):
@@ -178,3 +186,283 @@ class CustomerConversionTests(TestCase):
             Customer.objects.get(pk=first_customer.pk).originating_lead_id,
             self.lead.pk,
         )
+
+
+class CustomerCreationServiceTests(TestCase):
+    def test_general_customer_creation_generates_number(self):
+        customer = CustomerService.create(
+            name="  Example Organization  ",
+            email="contact@example.com",
+        )
+
+        self.assertEqual(customer.customer_number, "DMX-CUS-000001")
+        self.assertEqual(customer.name, "Example Organization")
+        self.assertEqual(customer.email, "contact@example.com")
+        self.assertEqual(
+            customer.customer_type,
+            Customer.CustomerType.ORGANIZATION,
+        )
+        self.assertEqual(customer.status, Customer.Status.ACTIVE)
+        self.assertIsNone(customer.originating_lead)
+
+    def test_general_customer_creation_supports_individuals(self):
+        customer = CustomerService.create(
+            customer_type=Customer.CustomerType.INDIVIDUAL,
+            name="Jane Doe",
+        )
+
+        self.assertEqual(
+            customer.customer_type,
+            Customer.CustomerType.INDIVIDUAL,
+        )
+        self.assertEqual(customer.name, "Jane Doe")
+
+    def test_general_customer_creation_rejects_blank_name(self):
+        with self.assertRaises(ValidationError):
+            CustomerService.create(name="   ")
+
+        self.assertEqual(Customer.objects.count(), 0)
+
+    def test_general_customer_creation_rejects_invalid_type(self):
+        with self.assertRaises(ValidationError):
+            CustomerService.create(
+                customer_type="INVALID",
+                name="Example Organization",
+            )
+
+        self.assertEqual(Customer.objects.count(), 0)
+
+
+class CustomerAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.list_url = reverse("customer-list")
+
+        self.staff_user = User.objects.create_user(
+            username="customer_staff",
+            password="test-password-123",
+            is_staff=True,
+        )
+
+        self.ordinary_user = User.objects.create_user(
+            username="ordinary_customer_user",
+            password="test-password-123",
+            is_staff=False,
+        )
+
+        self.customer = Customer.objects.create(
+            customer_number="DMX-CUS-000010",
+            customer_type=Customer.CustomerType.ORGANIZATION,
+            name="Existing Organization",
+            email="existing@example.com",
+            phone="+211900000000",
+        )
+
+    def test_anonymous_user_cannot_list_customers(self):
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_ordinary_user_cannot_list_customers(self):
+        self.client.force_authenticate(user=self.ordinary_user)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+    def test_staff_user_can_list_customers(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(
+            response.data[0]["customer_number"],
+            "DMX-CUS-000010",
+        )
+
+    def test_staff_user_can_retrieve_customer(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.get(
+            reverse(
+                "customer-detail",
+                kwargs={"pk": self.customer.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["name"],
+            "Existing Organization",
+        )
+
+    def test_staff_user_can_create_customer(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer_type": "ORGANIZATION",
+                "name": "New Organization",
+                "email": "new@example.com",
+                "phone": "+211911111111",
+                "country": "South Sudan",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(response.data["customer_number"], "DMX-CUS-000011")
+
+        customer = Customer.objects.get(
+            customer_number="DMX-CUS-000011"
+        )
+        self.assertEqual(customer.name, "New Organization")
+        self.assertEqual(customer.email, "new@example.com")
+
+    def test_client_cannot_choose_customer_number_or_status(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer_number": "CLIENT-CHOSEN-001",
+                "customer_type": "ORGANIZATION",
+                "name": "Protected Fields Organization",
+                "status": "SUSPENDED",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertEqual(response.data["customer_number"], "DMX-CUS-000011")
+        self.assertEqual(response.data["status"], Customer.Status.ACTIVE)
+
+    def test_blank_customer_name_is_rejected(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer_type": "ORGANIZATION",
+                "name": "   ",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(Customer.objects.count(), 1)
+
+    def test_staff_user_can_update_customer_profile(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.patch(
+            reverse(
+                "customer-detail",
+                kwargs={"pk": self.customer.pk},
+            ),
+            {
+                "name": "Updated Organization",
+                "email": "updated@example.com",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.name, "Updated Organization")
+        self.assertEqual(self.customer.email, "updated@example.com")
+
+    def test_customer_number_status_and_lead_are_read_only(self):
+        lead = Lead.objects.create(
+            full_name="Lead Contact",
+            email="lead@example.com",
+            phone="+211922222222",
+            organization="Lead Organization",
+            subject="ERP",
+            message="Interested in the ERP.",
+            status=Lead.Status.QUALIFIED,
+        )
+
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.patch(
+            reverse(
+                "customer-detail",
+                kwargs={"pk": self.customer.pk},
+            ),
+            {
+                "customer_number": "CHANGED-001",
+                "status": "SUSPENDED",
+                "originating_lead": lead.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.customer.refresh_from_db()
+        self.assertEqual(
+            self.customer.customer_number,
+            "DMX-CUS-000010",
+        )
+        self.assertEqual(self.customer.status, Customer.Status.ACTIVE)
+        self.assertIsNone(self.customer.originating_lead)
+
+        self.assertFalse(
+            Customer.objects.filter(originating_lead=lead).exists()
+        )
+
+    def test_customer_deletion_is_not_supported(self):
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.delete(
+            reverse(
+                "customer-detail",
+                kwargs={"pk": self.customer.pk},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+        self.assertTrue(
+            Customer.objects.filter(pk=self.customer.pk).exists()
+        )
+
+    def test_ordinary_user_cannot_create_customer(self):
+        self.client.force_authenticate(user=self.ordinary_user)
+
+        response = self.client.post(
+            self.list_url,
+            {
+                "customer_type": "ORGANIZATION",
+                "name": "Unauthorized Organization",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(Customer.objects.count(), 1)
