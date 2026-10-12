@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "demo_requests",
     "customers",
     "subscriptions",
+    "payments",
 ]
 
 
