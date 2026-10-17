@@ -1,3 +1,4 @@
+
 """
 URL configuration for the DMX Digital Solutions Commercial Platform.
 
@@ -27,6 +28,7 @@ urlpatterns = [
     path("api/v1/subscriptions/", include("subscriptions.urls")),
     path("api/v1/customers/", include("customers.urls")),
     path("api/v1/payments/", include("payments.urls")),
+    path("api/v1/orders/", include("orders.urls")),
 ]
 
 

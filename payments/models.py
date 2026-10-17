@@ -1,3 +1,4 @@
+
 """
 ============================================================
 DMX Digital Solutions
@@ -27,6 +28,10 @@ class Payment(models.Model):
 
     Payment records preserve transaction history. A payment is not
     considered successful merely because a request was submitted.
+
+    A payment may optionally be associated with an order or a
+    subscription. Existing subscription payment workflows remain
+    supported.
     """
 
     class PaymentMethod(models.TextChoices):
@@ -61,6 +66,15 @@ class Payment(models.Model):
         Customer,
         on_delete=models.PROTECT,
         related_name="payments",
+    )
+
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="payments",
+        help_text="Optional order associated with this payment.",
     )
 
     subscription = models.ForeignKey(
